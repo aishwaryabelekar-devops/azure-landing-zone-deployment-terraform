@@ -1,0 +1,55 @@
+# ==============================================================================
+# Azure DevOps Pipeline Step Template: Terraform Plan
+# Purpose: Generates an execution plan, creates a human-readable summary, and
+#          publishes the immutable plan artifact for review and approval gates.
+# ==============================================================================
+
+parameters:
+  - name: workingDirectory
+    type: string
+    default: 'environments/dev'
+    displayName: 'Working directory containing Terraform code'
+
+  - name: environment
+    type: string
+    default: 'dev'
+    displayName: 'Target deployment environment'
+
+  - name: backendServiceArm
+    type: string
+    default: 'sc-azure-landing-zone-service-connection'
+    displayName: 'ARM Service Connection for Azure authentication'
+
+  - name: planFileName
+    type: string
+    default: 'tfplan'
+    displayName: 'Binary plan output file name'
+
+steps:
+  # 1. Generate Terraform execution plan
+  - task: TerraformTaskV4@4
+    displayName: 'Terraform Plan (${{ parameters.environment }})'
+    inputs:
+      provider: 'azurerm'
+      command: 'plan'
+      workingDirectory: '$(System.DefaultWorkingDirectory)/azure-landing-zone-deployment/${{ parameters.workingDirectory }}'
+      environmentServiceNameAzureRM: '${{ parameters.backendServiceArm }}'
+      commandOptions: '-var-file="terraform.tfvars" -out="${{ parameters.planFileName }}" -detailed-exitcode'
+
+  # 2. Convert binary plan to human-readable text summary for reviewer inspection
+  - script: |
+      echo "==> Converting binary plan to human-readable summary..."
+      terraform show -no-color ${{ parameters.planFileName }} > $(Build.ArtifactStagingDirectory)/${{ parameters.environment }}-plan-summary.txt
+      cp ${{ parameters.planFileName }} $(Build.ArtifactStagingDirectory)/${{ parameters.environment }}-${{ parameters.planFileName }}
+      echo "==> Plan summary generated:"
+      cat $(Build.ArtifactStagingDirectory)/${{ parameters.environment }}-plan-summary.txt | head -n 40
+    displayName: 'Export Plan Summary'
+    workingDirectory: '$(System.DefaultWorkingDirectory)/azure-landing-zone-deployment/${{ parameters.workingDirectory }}'
+
+  # 3. Publish the plan artifact so it can be consumed by the manual review and Apply stages
+  - task: PublishPipelineArtifact@1
+    displayName: 'Publish Plan Artifact (${{ parameters.environment }})'
+    inputs:
+      targetPath: '$(Build.ArtifactStagingDirectory)'
+      artifact: 'terraform-plan-${{ parameters.environment }}'
+      publishLocation: 'pipeline'

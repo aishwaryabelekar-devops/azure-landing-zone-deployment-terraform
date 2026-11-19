@@ -1,0 +1,210 @@
+# ==============================================================================
+# Azure DevOps CI/CD Multi-Stage Pipeline: Azure Landing Zone Deployment
+# Project: Azure Landing Zone Deployment Using Terraform and Azure
+# Author: Aishwarya Belekar (https://github.com/aishwaryabelekar-devops)
+# Designation: Entry-Level DevOps Engineer / Junior DevOps Engineer / DevOps Consultant
+# ==============================================================================
+
+name: $(Build.DefinitionName)_$(Date:yyyyMMdd)$(Rev:.r)
+
+trigger:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    include:
+      - azure-landing-zone-deployment/**
+
+pr:
+  branches:
+    include:
+      - main
+      - develop
+  paths:
+    include:
+      - azure-landing-zone-deployment/**
+
+parameters:
+  - name: targetEnvironment
+    displayName: 'Target Deployment Environment'
+    type: string
+    default: 'dev'
+    values:
+      - dev
+      - test
+      - prod
+
+  - name: runSecurityScan
+    displayName: 'Run Static Security Analysis (Checkov / tfsec)'
+    type: boolean
+    default: true
+
+  - name: enableApply
+    displayName: 'Safety Toggle: Enable Terraform Apply (Disabled by default for portfolio safety)'
+    type: boolean
+    default: false
+
+variables:
+  - name: vmImageName
+    value: 'ubuntu-latest'
+  - name: terraformVersion
+    value: '1.16.5'
+  - name: serviceConnection
+    value: 'sc-azure-landing-zone-service-connection' # ARM Service Connection placeholder
+
+  # Environment-specific state backend settings
+  - ${{ if eq(parameters.targetEnvironment, 'dev') }}:
+    - name: backendResourceGroup
+      value: 'rg-terraform-state-dev-eastus'
+    - name: backendStorageAccount
+      value: 'sttfstatedeveastus01'
+    - name: backendContainer
+      value: 'tfstate'
+    - name: backendKey
+      value: 'dev.landingzone.terraform.tfstate'
+    - name: envWorkingDirectory
+      value: 'environments/dev'
+
+  - ${{ if eq(parameters.targetEnvironment, 'test') }}:
+    - name: backendResourceGroup
+      value: 'rg-terraform-state-test-eastus'
+    - name: backendStorageAccount
+      value: 'sttfstatetesteastus01'
+    - name: backendContainer
+      value: 'tfstate'
+    - name: backendKey
+      value: 'test.landingzone.terraform.tfstate'
+    - name: envWorkingDirectory
+      value: 'environments/test'
+
+  - ${{ if eq(parameters.targetEnvironment, 'prod') }}:
+    - name: backendResourceGroup
+      value: 'rg-terraform-state-prod-eastus'
+    - name: backendStorageAccount
+      value: 'sttfstateprodeastus01'
+    - name: backendContainer
+      value: 'tfstate'
+    - name: backendKey
+      value: 'prod.landingzone.terraform.tfstate'
+    - name: envWorkingDirectory
+      value: 'environments/prod'
+
+stages:
+  # ============================================================================
+  # STAGE 1: Code Quality, Format Check & Syntax Validation
+  # ============================================================================
+  - stage: Validate
+    displayName: 'Stage 1: Validation & Security'
+    jobs:
+      - job: ValidateTerraform
+        displayName: 'Validate Terraform Code'
+        pool:
+          vmImage: $(vmImageName)
+        steps:
+          # Install Terraform CLI
+          - task: TerraformInstaller@1
+            displayName: 'Install Terraform CLI $(terraformVersion)'
+            inputs:
+              terraformVersion: '$(terraformVersion)'
+
+          # Check formatting across all modules and target environment
+          - script: |
+              echo "==> Verifying canonical Terraform code formatting..."
+              terraform fmt -check -diff -recursive azure-landing-zone-deployment/
+            displayName: 'Terraform Format Check (fmt)'
+
+          # Initialize modules locally without backend for syntax validation
+          - script: |
+              echo "==> Initializing target environment without remote backend for offline validation..."
+              cd azure-landing-zone-deployment/$(envWorkingDirectory)
+              terraform init -backend=false
+            displayName: 'Terraform Local Init (backend=false)'
+
+          # Reusable validation and security scanning template
+          - template: ../templates/terraform-validate.yml
+            parameters:
+              workingDirectory: $(envWorkingDirectory)
+              runSecurityScan: ${{ parameters.runSecurityScan }}
+
+  # ============================================================================
+  # STAGE 2: Terraform Plan Generation & Artifact Publishing
+  # ============================================================================
+  - stage: Plan
+    displayName: 'Stage 2: Plan Generation (${{ parameters.targetEnvironment }})'
+    dependsOn: Validate
+    condition: succeeded()
+    jobs:
+      - job: PlanTerraform
+        displayName: 'Generate Execution Plan'
+        pool:
+          vmImage: $(vmImageName)
+        steps:
+          # Initialize remote backend connection via reusable template
+          - template: ../templates/terraform-init.yml
+            parameters:
+              workingDirectory: $(envWorkingDirectory)
+              terraformVersion: $(terraformVersion)
+              backendServiceArm: $(serviceConnection)
+              backendAzureRmResourceGroupName: $(backendResourceGroup)
+              backendAzureRmStorageAccountName: $(backendStorageAccount)
+              backendAzureRmContainerName: $(backendContainer)
+              backendAzureRmKey: $(backendKey)
+
+          # Execute plan and publish plan artifact via reusable template
+          - template: ../templates/terraform-plan.yml
+            parameters:
+              workingDirectory: $(envWorkingDirectory)
+              environment: ${{ parameters.targetEnvironment }}
+              backendServiceArm: $(serviceConnection)
+              planFileName: 'tfplan-${{ parameters.targetEnvironment }}'
+
+  # ============================================================================
+  # STAGE 3: Manual Approval Gate (Conceptual / Environment Gate)
+  # ============================================================================
+  - stage: Manual_Approval
+    displayName: 'Stage 3: Approval Gate (${{ parameters.targetEnvironment }})'
+    dependsOn: Plan
+    condition: succeeded()
+    jobs:
+      - deployment: ApprovalGate
+        displayName: 'Review Plan & Approve Deployment'
+        pool:
+          vmImage: $(vmImageName)
+        environment: 'landing-zone-${{ parameters.targetEnvironment }}-approval'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - script: |
+                    echo "======================================================================"
+                    echo "Manual review step reached for environment: ${{ parameters.targetEnvironment }}"
+                    echo "In Azure DevOps, configure Environment 'landing-zone-${{ parameters.targetEnvironment }}-approval'"
+                    echo "with Approvals & Checks policy so designated reviewers inspect tfplan summary."
+                    echo "======================================================================"
+                  displayName: 'Approval Gate Log'
+
+  # ============================================================================
+  # STAGE 4: Terraform Apply (Safe / Example Only)
+  # ============================================================================
+  - stage: Apply
+    displayName: 'Stage 4: Apply Changes (${{ parameters.targetEnvironment }})'
+    dependsOn: Manual_Approval
+    condition: and(succeeded(), eq('${{ parameters.enableApply }}', true))
+    jobs:
+      - deployment: ApplyDeployment
+        displayName: 'Apply Terraform Changes'
+        pool:
+          vmImage: $(vmImageName)
+        environment: 'azure-landing-zone-${{ parameters.targetEnvironment }}'
+        strategy:
+          runOnce:
+            deploy:
+              steps:
+                - template: ../templates/terraform-apply.yml
+                  parameters:
+                    workingDirectory: $(envWorkingDirectory)
+                    environment: ${{ parameters.targetEnvironment }}
+                    backendServiceArm: $(serviceConnection)
+                    planFileName: 'tfplan-${{ parameters.targetEnvironment }}'
+                    enableExecution: ${{ parameters.enableApply }}

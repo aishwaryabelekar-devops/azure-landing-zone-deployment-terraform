@@ -1,0 +1,59 @@
+# ==============================================================================
+# .gitignore: Terraform & Cloud DevOps Repository
+# ==============================================================================
+
+# Local Terraform runtime directory (created during terraform init)
+**/.terraform/
+
+# Terraform State files (contains sensitive infrastructure metadata & secrets)
+*.tfstate
+*.tfstate.*
+*.tfstate.backup
+
+# Terraform execution plan files (can contain unencrypted plan attributes)
+*.tfplan
+*.tfplan.*
+
+# Crash logs
+crash.log
+crash.*.log
+
+# CLI configuration and override files
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json
+
+# Local variable files that might contain sensitive / uncommitted data
+# Note: Root repository includes safe demonstration 'terraform.tfvars' files.
+# Any local secret or auto-loaded override files are strictly ignored.
+*.auto.tfvars
+*.auto.tfvars.json
+*.secret.tfvars
+secrets.tfvars
+personal.tfvars
+
+# Keep the provider lock file for deterministic CI builds
+!.terraform.lock.hcl
+
+# Operating System temporary files
+Thumbs.db
+ehthumbs.db
+[Dd]esktop.ini
+$RECYCLE.BIN/
+.DS_Store
+._*
+
+# IDE and Text Editor settings
+.idea/
+.vscode/*
+!.vscode/settings.json
+!.vscode/extensions.json
+*.swp
+*.swo
+*~
+*.bak
+
+# Azure CLI and cloud credentials cache
+.azure/
+azureProfile.json

@@ -1,0 +1,61 @@
+# ==============================================================================
+# Azure DevOps Pipeline Step Template: Terraform Init
+# Purpose: Installs Terraform CLI, initializes provider plugins, and connects
+#          to remote Azure Blob Storage state backend securely.
+# ==============================================================================
+
+parameters:
+  - name: workingDirectory
+    type: string
+    default: 'environments/dev'
+    displayName: 'Working directory containing Terraform root module'
+
+  - name: terraformVersion
+    type: string
+    default: '1.16.5'
+    displayName: 'Terraform CLI version to install'
+
+  - name: backendServiceArm
+    type: string
+    default: 'sc-azure-landing-zone-service-connection'
+    displayName: 'Azure Resource Manager Service Connection name (ARM Service Principal)'
+
+  - name: backendAzureRmResourceGroupName
+    type: string
+    default: 'rg-terraform-state-dev-eastus'
+    displayName: 'Azure Resource Group hosting tfstate storage account'
+
+  - name: backendAzureRmStorageAccountName
+    type: string
+    default: 'sttfstatedeveastus01'
+    displayName: 'Azure Storage Account name hosting state container'
+
+  - name: backendAzureRmContainerName
+    type: string
+    default: 'tfstate'
+    displayName: 'Blob container name for tfstate file'
+
+  - name: backendAzureRmKey
+    type: string
+    default: 'dev.landingzone.terraform.tfstate'
+    displayName: 'Blob state file key path'
+
+steps:
+  # 1. Install specific Terraform CLI version onto the build agent
+  - task: TerraformInstaller@1
+    displayName: 'Install Terraform CLI ${{ parameters.terraformVersion }}'
+    inputs:
+      terraformVersion: '${{ parameters.terraformVersion }}'
+
+  # 2. Initialize Terraform with backend configuration using ARM Service Connection
+  - task: TerraformTaskV4@4
+    displayName: 'Terraform Init (${{ parameters.workingDirectory }})'
+    inputs:
+      provider: 'azurerm'
+      command: 'init'
+      workingDirectory: '$(System.DefaultWorkingDirectory)/azure-landing-zone-deployment/${{ parameters.workingDirectory }}'
+      backendServiceArm: '${{ parameters.backendServiceArm }}'
+      backendAzureRmResourceGroupName: '${{ parameters.backendAzureRmResourceGroupName }}'
+      backendAzureRmStorageAccountName: '${{ parameters.backendAzureRmStorageAccountName }}'
+      backendAzureRmContainerName: '${{ parameters.backendAzureRmContainerName }}'
+      backendAzureRmKey: '${{ parameters.backendAzureRmKey }}'

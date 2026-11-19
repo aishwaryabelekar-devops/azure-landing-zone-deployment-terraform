@@ -1,0 +1,70 @@
+# ==============================================================================
+# Azure DevOps Pipeline Step Template: Terraform Apply (Safe / Example Only)
+# Purpose: Applies the reviewed, pre-generated Terraform plan to target cloud environment.
+#          By default, execution is disabled (enableExecution: false) to prevent
+#          unintended cloud resource creation in learning and portfolio setups.
+# ==============================================================================
+
+parameters:
+  - name: workingDirectory
+    type: string
+    default: 'environments/dev'
+    displayName: 'Working directory containing Terraform code'
+
+  - name: environment
+    type: string
+    default: 'dev'
+    displayName: 'Target deployment environment'
+
+  - name: backendServiceArm
+    type: string
+    default: 'sc-azure-landing-zone-service-connection'
+    displayName: 'ARM Service Connection for Azure authentication'
+
+  - name: planFileName
+    type: string
+    default: 'tfplan'
+    displayName: 'Binary plan file name to apply'
+
+  - name: enableExecution
+    type: boolean
+    default: false
+    displayName: 'Safety toggle: Set to true only in production with verified Azure credentials'
+
+steps:
+  # 1. Download pre-generated plan artifact from upstream Plan stage
+  - task: DownloadPipelineArtifact@2
+    displayName: 'Download Plan Artifact (${{ parameters.environment }})'
+    inputs:
+      buildType: 'current'
+      artifactName: 'terraform-plan-${{ parameters.environment }}'
+      targetPath: '$(System.DefaultWorkingDirectory)/azure-landing-zone-deployment/${{ parameters.workingDirectory }}'
+
+  # 2. Safe execution guard: Displays instructional message when execution is disabled (portfolio default)
+  - ${{ if eq(parameters.enableExecution, false) }}:
+    - script: |
+        echo "================================================================================"
+        echo " [PORTFOLIO SAFETY NOTICE] Terraform Apply Execution Is Disabled By Default"
+        echo "================================================================================"
+        echo "Target Environment : ${{ parameters.environment }}"
+        echo "Working Directory  : ${{ parameters.workingDirectory }}"
+        echo "Plan File          : ${{ parameters.planFileName }}"
+        echo ""
+        echo "This portfolio project adheres to safe DevOps practices:"
+        echo " 1. Infrastructure code formatting and syntax have been validated."
+        echo " 2. An execution plan was calculated and published for peer review."
+        echo " 3. Real infrastructure deployment is guarded behind manual approval & safety toggles."
+        echo "To execute in a live corporate tenant, set parameter 'enableExecution: true'."
+        echo "================================================================================"
+      displayName: 'Safe Guard: Apply Simulation Notice'
+
+  # 3. Apply changes (Executed strictly when enableExecution is set to true)
+  - ${{ if eq(parameters.enableExecution, true) }}:
+    - task: TerraformTaskV4@4
+      displayName: 'Terraform Apply (${{ parameters.environment }})'
+      inputs:
+        provider: 'azurerm'
+        command: 'apply'
+        workingDirectory: '$(System.DefaultWorkingDirectory)/azure-landing-zone-deployment/${{ parameters.workingDirectory }}'
+        environmentServiceNameAzureRM: '${{ parameters.backendServiceArm }}'
+        commandOptions: '${{ parameters.planFileName }}'
